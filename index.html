@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Voice Assistant</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 20px;
+            background-color: #f5f5f5;
+            margin: 0;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h2 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        #messages {
+            border: 2px solid #e0e0e0;
+            padding: 15px;
+            height: 300px;
+            overflow-y: auto;
+            margin-bottom: 20px;
+            background-color: #fafafa;
+            border-radius: 8px;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        #voiceChunks {
+            border: 2px solid #e3f2fd;
+            padding: 15px;
+            height: 100px;
+            overflow-y: auto;
+            margin-bottom: 20px;
+            background-color: #f8fbff;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 12px;
+            color: #1976d2;
+        }
+        #transcript {
+            font-style: italic;
+            color: #666;
+            margin-bottom: 15px;
+            padding: 10px;
+            background-color: #fff3e0;
+            border-radius: 5px;
+            border: 1px solid #ffcc02;
+        }
+        #error {
+            color: #d32f2f;
+            background-color: #ffebee;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            border: 1px solid #ffcdd2;
+        }
+        #status {
+            color: #2e7d32;
+            background-color: #e8f5e8;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            border: 1px solid #c8e6c9;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        #startBtn {
+            background-color: #4caf50;
+            color: white;
+        }
+        #startBtn:hover:not(:disabled) {
+            background-color: #45a049;
+        }
+        #stopBtn {
+            background-color: #f44336;
+            color: white;
+        }
+        #stopBtn:hover:not(:disabled) {
+            background-color: #da190b;
+        }
+        #sendBtn {
+            background-color: #2196f3;
+            color: white;
+        }
+        #sendBtn:hover:not(:disabled) {
+            background-color: #1976d2;
+        }
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        #input {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        #input:focus {
+            outline: none;
+            border-color: #2196f3;
+        }
+        .message {
+            margin-bottom: 10px;
+            padding: 8px;
+            border-radius: 5px;
+        }
+        .bot-message {
+            background-color: #e3f2fd;
+            border-left: 4px solid #2196f3;
+        }
+        .user-message {
+            background-color: #f3e5f5;
+            border-left: 4px solid #9c27b0;
+        }
+        .info-message {
+            background-color: #fff3e0;
+            border-left: 4px solid #ff9800;
+        }
+        .voice-chunk {
+            background-color: #e8f5e8;
+            border-left: 4px solid #4caf50;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .recording-indicator {
+            display: none;
+            background-color: #ffebee;
+            color: #d32f2f;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            border: 1px solid #ffcdd2;
+            text-align: center;
+            font-weight: bold;
+        }
+        .recording-indicator.active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>🎙️ Voice Assistant</h2>
+        
+        <div id="status" style="display: none;"></div>
+        <div id="error" style="display: none;"></div>
+        <div class="recording-indicator" id="recordingIndicator">🔴 RECORDING - Speak now...</div>
+        
+        <div id="messages"></div>
+        
+        <div style="margin-bottom: 15px;">
+            <strong>Voice Chunks:</strong>
+            <div id="voiceChunks"></div>
+        </div>
+        
+        <div id="transcript"></div>
+        
+        <div class="controls">
+            <button id="startBtn" onclick="startVoiceRecording()">🎤 Start Recording</button>
+            <button id="stopBtn" onclick="stopVoiceRecording()" disabled>🛑 Stop Recording</button>
+            <input id="input" type="text" placeholder="Or type a message..." />
+            <button id="sendBtn" onclick="sendMessage()">Send</button>
+        </div>
+        
+        <audio id="audioPlayer"></audio>
+    </div>
+
+    <script>
+        let ws = null;
+        let recognition = null;
+        let isRecording = false;
+        let accumulatedTranscript = "";
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 5;
+
+        // DOM elements
+        const messages = document.getElementById("messages");
+        const voiceChunks = document.getElementById("voiceChunks");
+        const transcript = document.getElementById("transcript");
+        const errorDiv = document.getElementById("error");
+        const statusDiv = document.getElementById("status");
+        const input = document.getElementById("input");
+        const audioPlayer = document.getElementById("audioPlayer");
+        const startBtn = document.getElementById("startBtn");
+        const stopBtn = document.getElementById("stopBtn");
+        const sendBtn = document.getElementById("sendBtn");
+        const recordingIndicator = document.getElementById("recordingIndicator");
+
+        // Initialize speech recognition
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        
+        function initializeSpeechRecognition() {
+            if (!SpeechRecognition) {
+                showError("Speech recognition not supported in this browser. Please use Chrome or Safari.");
+                return false;
+            }
+
+            recognition = new SpeechRecognition();
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.lang = "en-US";
+
+            recognition.onresult = (event) => {
+                let interimTranscript = "";
+                let finalTranscript = "";
+                
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const transcriptText = event.results[i][0].transcript;
+                    if (event.results[i].isFinal) {
+                        finalTranscript += transcriptText;
+                    } else {
+                        interimTranscript += transcriptText;
+                    }
+                }
+
+                // Show current transcription
+                const currentText = finalTranscript || interimTranscript;
+                if (currentText) {
+                    transcript.textContent = `Transcribing: ${currentText}`;
+                    
+                    // Send voice chunk to server to display
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ 
+                            type: "voice_chunk", 
+                            content: currentText 
+                        }));
+                    }
+                }
+
+                // Accumulate final results
+                if (finalTranscript) {
+                    accumulatedTranscript += finalTranscript;
+                }
+            };
+
+            recognition.onerror = (event) => {
+                console.error("Speech recognition error:", event.error);
+                showError(`Speech recognition error: ${event.error}. Please check microphone permissions.`);
+                stopVoiceRecording();
+            };
+
+            recognition.onend = () => {
+                if (isRecording) {
+                    // Restart if we're still supposed to be recording
+                    try {
+                        recognition.start();
+                    } catch (e) {
+                        console.error("Failed to restart recognition:", e);
+                        stopVoiceRecording();
+                    }
+                }
+            };
+
+            return true;
+        }
+
+        // WebSocket connection management
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const url = `${protocol}//${window.location.host}/chat`;
+            
+            ws = new WebSocket(url);
+
+            ws.onopen = () => {
+                showStatus("Connected to voice assistant!");
+                hideError();
+                reconnectAttempts = 0;
+                
+                // Enable controls
+                startBtn.disabled = false;
+                sendBtn.disabled = false;
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                
+                switch (data.type) {
+                    case "message":
+                        addMessage("🤖 " + data.content, "bot-message");
+                        break;
+                    case "voice_chunk":
+                        addVoiceChunk(data.content);
+                        break;
+                    case "audio":
+                        audioPlayer.src = `data:audio/mp3;base64,${data.content}`;
+                        audioPlayer.play().catch(e => console.error("Audio play failed:", e));
+                        break;
+                    case "error":
+                        showError(`Server error: ${data.content}`);
+                        break;
+                    case "info":
+                        addMessage("ℹ️ " + data.content, "info-message");
+                        break;
+                    case "keepalive":
+                        // Just acknowledge the keepalive
+                        break;
+                    case "pong":
+                        // Response to our ping
+                        break;
+                }
+            };
+
+            ws.onerror = (error) => {
+                console.error("WebSocket error:", error);
+                showError("Connection error. Attempting to reconnect...");
+            };
+
+            ws.onclose = () => {
+                console.info("WebSocket connection closed");
+                startBtn.disabled = true;
+                sendBtn.disabled = true;
+                
+                if (reconnectAttempts < maxReconnectAttempts) {
+                    showStatus(`Connection lost. Reconnecting... (${reconnectAttempts + 1}/${maxReconnectAttempts})`);
+                    reconnectAttempts++;
+                    setTimeout(connectWebSocket, 2000 * reconnectAttempts);
+                } else {
+                    showError("Connection lost. Please refresh the page to reconnect.");
+                }
+            };
+        }
+
+        // Voice recording functions
+        function startVoiceRecording() {
+            if (!recognition) {
+                showError("Speech recognition not available");
+                return;
+            }
+
+            try {
+                accumulatedTranscript = "";
+                isRecording = true;
+                recognition.start();
+                
+                // Update UI
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                recordingIndicator.classList.add('active');
+                voiceChunks.innerHTML = "";
+                
+                // Notify server
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: "start_recording" }));
+                }
+                
+                showStatus("Recording started. Speak now!");
+                
+            } catch (e) {
+                console.error("Failed to start recording:", e);
+                showError("Could not start recording. Please check microphone permissions.");
+                resetRecordingState();
+            }
+        }
+
+        function stopVoiceRecording() {
+            if (!isRecording) return;
+            
+            isRecording = false;
+            
+            if (recognition) {
+                recognition.stop();
+            }
+            
+            // Update UI
+            resetRecordingState();
+            
+            // Send accumulated transcript to server
+            if (ws && ws.readyState === WebSocket.OPEN && accumulatedTranscript.trim()) {
+                ws.send(JSON.stringify({ 
+                    type: "stop_recording", 
+                    content: accumulatedTranscript.trim()
+                }));
+                addMessage("👤 " + accumulatedTranscript.trim(), "user-message");
+            } else if (!accumulatedTranscript.trim()) {
+                showError("No speech detected. Please try again.");
+            }
+            
+            transcript.textContent = "";
+            accumulatedTranscript = "";
+        }
+
+        function resetRecordingState() {
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            recordingIndicator.classList.remove('active');
+        }
+
+        // Message functions
+        function sendMessage() {
+            const text = input.value.trim();
+            if (!text || !ws || ws.readyState !== WebSocket.OPEN) {
+                if (!text) return;
+                showError("Cannot send message: Not connected to server");
+                return;
+            }
+
+            ws.send(JSON.stringify({ type: "text", content: text }));
+            addMessage("👤 " + text, "user-message");
+            input.value = "";
+        }
+
+        function addMessage(content, className = "") {
+            const div = document.createElement("div");
+            div.className = `message ${className}`;
+            div.textContent = content;
+            messages.appendChild(div);
+            messages.scrollTop = messages.scrollHeight;
+        }
+
+        function addVoiceChunk(content) {
+            const div = document.createElement("div");
+            div.className = "message voice-chunk";
+            div.textContent = `[${new Date().toLocaleTimeString()}] ${content}`;
+            voiceChunks.appendChild(div);
+            voiceChunks.scrollTop = voiceChunks.scrollHeight;
+        }
+
+        function showError(message) {
+            errorDiv.textContent = message;
+            errorDiv.style.display = "block";
+            statusDiv.style.display = "none";
+        }
+
+        function showStatus(message) {
+            statusDiv.textContent = message;
+            statusDiv.style.display = "block";
+            errorDiv.style.display = "none";
+        }
+
+        function hideError() {
+            errorDiv.style.display = "none";
+        }
+
+        // Event listeners
+        input.addEventListener("keypress", (e) => {
+            if (e.key === "Enter") sendMessage();
+        });
+
+        // Keepalive ping
+        setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: "ping" }));
+            }
+        }, 30000);
+
+        // Initialize app
+        window.addEventListener('load', () => {
+            if (window.location.protocol !== "https:" && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
+                showError("Speech recognition requires HTTPS. Please use a secure connection or localhost.");
+            } else {
+                if (initializeSpeechRecognition()) {
+                    connectWebSocket();
+                }
+            }
+        });
+
+        // Handle page visibility for connection management
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible' && (!ws || ws.readyState === WebSocket.CLOSED)) {
+                connectWebSocket();
+            }
+        });
+    </script>
+</body>
+</html>
